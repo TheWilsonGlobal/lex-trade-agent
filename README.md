@@ -91,40 +91,46 @@ sequenceDiagram
 
 ```text
 lex-trade-agent/
-├── mcp_servers/
+├── src/
 │   ├── __init__.py
-│   └── compliance_mcp.py        # FastMCP server exposing 3 compliance tools
-├── database/
-│   ├── __init__.py
-│   ├── schema.sql               # SQLite schema with indexes for episodes and audit_logs
-│   └── seed_sample_data.py      # Seeder script populating historical compliance episodes
-├── agent/
-│   ├── __init__.py
-│   ├── hermes_orchestrator.py   # Autonomous Hermes ReAct / Plan-and-Solve engine
-│   ├── memory/
+│   ├── mcp_servers/
 │   │   ├── __init__.py
-│   │   └── hybrid_memory.py     # Episodic memory with SQLite + vector semantic search
-│   └── skills/
-│       └── SKILL_DUAL_USE_AUDIT.md # Hermes-style self-improving skill document
-├── eval/
-│   ├── __init__.py
-│   └── agent_eval.py            # Non-lexical agent evaluation benchmark
+│   │   └── compliance_mcp.py        # FastMCP server exposing 3 compliance tools
+│   ├── database/
+│   │   ├── __init__.py
+│   │   ├── schema.sql               # SQLite schema with indexes for episodes and audit_logs
+│   │   └── seed_sample_data.py      # Seeder script populating historical compliance episodes
+│   ├── agent/
+│   │   ├── __init__.py
+│   │   ├── hermes_orchestrator.py   # Autonomous Hermes ReAct / Plan-and-Solve engine
+│   │   ├── memory/
+│   │   │   ├── __init__.py
+│   │   │   └── hybrid_memory.py     # Episodic memory with SQLite + vector semantic search
+│   │   └── skills/
+│   │       └── SKILL_DUAL_USE_AUDIT.md # Hermes-style self-improving skill document
+│   ├── ui/
+│   │   ├── __init__.py
+│   │   └── app.py                   # Streamlit live compliance cockpit & ReAct visualizer
+│   └── eval/
+│       ├── __init__.py
+│       └── agent_eval.py            # Non-lexical agent evaluation benchmark
 ├── tests/
 │   ├── __init__.py
-│   ├── test_mcp_tools.py        # Unit tests for MCP server tools
-│   └── test_orchestrator.py     # End-to-end test with MockLLM fallback
+│   ├── test_mcp_tools.py            # Unit tests for MCP server tools
+│   └── test_orchestrator.py         # End-to-end test with MockLLM fallback
 ├── docker/
-│   ├── Dockerfile               # Sandboxed container for agent code & shell tasks
-│   └── docker-compose.yml       # Orchestrated multi-container stack
-├── pyproject.toml               # Poetry/pip configuration with strict dependencies
-└── README.md                    # Architecture diagram, MCP protocol flow, and quickstart guide
+│   ├── Dockerfile                   # Sandboxed container for agent code & shell tasks
+│   └── docker-compose.yml           # Orchestrated multi-container stack
+├── lex_trade_memory.db              # SQLite memory & audit journal database
+├── pyproject.toml                   # Poetry/pip configuration with strict dependencies
+└── README.md                        # Architecture diagram, MCP protocol flow, and quickstart guide
 ```
 
 ---
 
 ## Component Deep Dive
 
-### 1. `mcp_servers/compliance_mcp.py`
+### 1. `src/mcp_servers/compliance_mcp.py`
 Provides 3 production-grade tools conforming to the FastMCP specification:
 - `screen_entity(name, country)`:
   - Token-aware fuzzy string matching against embedded mock OFAC SDN and EU consolidated sanctions databases.
@@ -138,17 +144,17 @@ Provides 3 production-grade tools conforming to the FastMCP specification:
     - **Category 6 (6A003)**: Thermal infrared focal plane arrays with frame rate $> 9\text{ Hz}$.
     - **Category 9 (9A012)**: Unmanned aerial vehicles (drones) and autonomous flight hardware.
 
-### 2. `agent/hermes_orchestrator.py`
+### 2. `src/agent/hermes_orchestrator.py`
 - Implements the Hermes ReAct loop using explicit `<scratchpad>` thoughts and XML tool invocation (`<tool_call>{"name": ..., "arguments": ...}</tool_call>`).
 - Supports **dynamic error recovery**: when a fuzzy match triggers ambiguity (`POTENTIAL_MATCH_REVIEW`), the agent formulates alternate alias queries rather than prematurely failing.
 - Provides LLM client abstraction supporting OpenAI-compatible endpoints (`base_url="http://localhost:8000/v1"`, OpenRouter, or Hermes 3 GGUF) with automatic detection and seamless fallback to `MockLLMClient` (no external API keys required to test or run).
 
-### 3. `agent/memory/hybrid_memory.py`
+### 3. `src/agent/memory/hybrid_memory.py`
 - **Short-Term Scratchpad**: In-memory sliding-window context keeping the agent grounded in recent steps.
 - **Persistent Long-Term Audit Trail**: SQLite database recording every step payload, parameter, and timestamp for compliance non-repudiation.
 - **Semantic Episodic Lookup**: In-memory vector index computing cosine similarity over past resolution traces, enabling precedent reuse for recurring classifications.
 
-### 4. `eval/agent_eval.py`
+### 4. `src/eval/agent_eval.py`
 Evaluates agent execution along 4 non-lexical pillars:
 1. **Task Completion Precision**: Correct risk classification across sanction and dual-use cases (100% in benchmark).
 2. **Tool Invocation Accuracy**: Zero hallucinated parameters and minimal redundant calls (100% in benchmark).
@@ -169,34 +175,40 @@ Evaluates agent execution along 4 non-lexical pillars:
 cd C:\Git\JOBs\aie\lex-trade-agent
 
 # Install dependencies
-pip install pydantic mcp httpx numpy pytest pytest-asyncio
+pip install pydantic mcp httpx numpy streamlit python-dotenv pytest pytest-asyncio
 ```
 
-### 1. Run the CLI Demo
-Execute the ready-to-run end-to-end export compliance check:
+### 1. Launch the Streamlit Live Compliance Cockpit (UI)
+Launch the interactive web cockpit with live ReAct visualizer, episodic precedent search, non-repudiation audit logs, and 4-pillar benchmark runner:
 ```bash
-python -m agent.hermes_orchestrator
+streamlit run src/ui/app.py
 ```
 
-### 2. Run the Evaluation Benchmark
+### 2. Run the CLI Demo
+Execute the ready-to-run end-to-end export compliance check via terminal:
+```bash
+python -m src.agent.hermes_orchestrator
+```
+
+### 3. Run the Evaluation Benchmark
 Run the 4-pillar non-lexical benchmark:
 ```bash
-python -m eval.agent_eval
+python -m src.eval.agent_eval
 ```
 
-### 3. Run the Test Suite
+### 4. Run the Test Suite
 Execute all unit and end-to-end tests:
 ```bash
 pytest -v
 ```
 
-### 4. Seed Historical Precedents (Optional)
+### 5. Seed Historical Precedents (Optional)
 Populate diverse sample compliance episodes into the SQLite database:
 ```bash
-python -m database.seed_sample_data
+python -m src.database.seed_sample_data
 ```
 
-### 5. Docker Sandboxed Execution
+### 6. Docker Sandboxed Execution
 Run inside isolated containers with non-root security boundaries:
 ```bash
 cd docker

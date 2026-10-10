@@ -17,6 +17,8 @@ dependencies = [
     "mcp>=1.0.0",
     "httpx>=0.24.0",
     "numpy>=1.24.0",
+    "streamlit>=1.30.0",
+    "python-dotenv>=1.0.0",
 ]
 
 [project.optional-dependencies]
@@ -30,6 +32,7 @@ dev = [
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 python_files = ["test_*.py"]
+pythonpath = ["src"]
 asyncio_mode = "auto"
 
 [tool.ruff]

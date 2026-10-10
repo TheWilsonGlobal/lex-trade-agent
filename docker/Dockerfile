@@ -24,7 +24,7 @@ RUN groupadd -g 1001 appgroup && \
 # Install Python package dependencies
 COPY pyproject.toml ${APP_HOME}/
 RUN pip install --upgrade pip setuptools wheel && \
-    pip install pydantic mcp httpx numpy pytest pytest-asyncio
+    pip install pydantic mcp httpx numpy streamlit python-dotenv pytest pytest-asyncio
 
 # Copy project source code
 COPY . ${APP_HOME}/
@@ -37,9 +37,9 @@ USER appuser
 
 # Healthcheck verifying MCP server or agent import
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \
-    CMD python -c "from mcp_servers.compliance_mcp import screen_entity; print('healthy')" || exit 1
+    CMD python -c "from src.mcp_servers.compliance_mcp import screen_entity; print('healthy')" || exit 1
 
-EXPOSE 8000
+EXPOSE 8000 8501
 
 # Default entrypoint runs the end-to-end CLI demonstration
-CMD ["python", "-m", "agent.hermes_orchestrator"]
+CMD ["python", "-m", "src.agent.hermes_orchestrator"]
