@@ -1,0 +1,37 @@
+[build-system]
+requires = ["poetry-core>=1.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+[project]
+name = "lex-trade-agent"
+version = "0.1.0"
+description = "Autonomous Trade Compliance & Export Control Agent powered by Hermes reasoning loop and MCP"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "Principal AI Systems Architect", email = "architect@lex-trade.local" }
+]
+dependencies = [
+    "pydantic>=2.0.0",
+    "mcp>=1.0.0",
+    "httpx>=0.24.0",
+    "numpy>=1.24.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=7.4.0",
+    "pytest-asyncio>=0.21.0",
+    "black>=23.7.0",
+    "ruff>=0.1.0",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+python_files = ["test_*.py"]
+asyncio_mode = "auto"
+
+[tool.ruff]
+line-length = 100
+target-version = "py310"

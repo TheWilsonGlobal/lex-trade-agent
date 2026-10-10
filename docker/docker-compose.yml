@@ -1,0 +1,40 @@
+version: '3.8'
+
+services:
+  agent:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: lex-trade-agent
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+      - OPENAI_BASE_URL=http://llm-server:8000/v1
+      - OPENAI_API_KEY=local-dev-key
+      - SQLITE_DB_PATH=/app/data/lex_trade_memory.db
+    volumes:
+      - agent-data:/app/data
+    networks:
+      - compliance-net
+    command: ["python", "-m", "agent.hermes_orchestrator"]
+
+  mcp-server:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+    container_name: lex-compliance-mcp
+    restart: unless-stopped
+    environment:
+      - PYTHONUNBUFFERED=1
+    ports:
+      - "8080:8080"
+    networks:
+      - compliance-net
+    command: ["python", "mcp_servers/compliance_mcp.py"]
+
+networks:
+  compliance-net:
+    driver: bridge
+
+volumes:
+  agent-data:
