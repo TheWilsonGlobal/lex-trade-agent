@@ -17,6 +17,7 @@ import sys
 import time
 from typing import Any, Dict, List
 
+from dotenv import load_dotenv
 import streamlit as st
 
 # Configure project path
@@ -25,6 +26,9 @@ SRC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), ".."))
 for p in (PROJECT_ROOT, SRC_DIR):
     if p not in sys.path:
         sys.path.insert(0, p)
+
+# Load environment variables from .env
+load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=True)
 
 from agent.hermes_orchestrator import HermesAgent, create_llm_client
 from agent.memory.hybrid_memory import AgentEpisodicMemory

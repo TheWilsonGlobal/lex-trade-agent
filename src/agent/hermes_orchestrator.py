@@ -12,6 +12,7 @@ Features:
 
 from __future__ import annotations
 
+import ast
 import json
 import os
 import re
@@ -199,20 +200,26 @@ class MockLLMClient(BaseLLMClient):
 
 def load_env_file() -> None:
     """Load key-value pairs from .env file into os.environ if not already set."""
-    env_file = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env"))
-    if os.path.exists(env_file):
-        try:
-            with open(env_file, "r", encoding="utf-8") as f:
-                for line in f:
-                    line = line.strip()
-                    if line and not line.startswith("#") and "=" in line:
-                        k, v = line.split("=", 1)
-                        k = k.strip()
-                        v = v.strip().strip('"').strip("'")
-                        if k and k not in os.environ:
-                            os.environ[k] = v
-        except Exception:
-            pass
+    # Check repository root (.env)
+    candidate_paths = [
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".env")),
+        os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".env")),
+    ]
+    for env_file in candidate_paths:
+        if os.path.exists(env_file):
+            try:
+                with open(env_file, "r", encoding="utf-8") as f:
+                    for line in f:
+                        line = line.strip()
+                        if line and not line.startswith("#") and "=" in line:
+                            k, v = line.split("=", 1)
+                            k = k.strip()
+                            v = v.strip().strip('"').strip("'")
+                            if k:
+                                os.environ[k] = v
+                break
+            except Exception:
+                pass
 
 
 def create_llm_client(
@@ -252,17 +259,22 @@ def create_llm_client(
 SYSTEM_PROMPT = """You are Hermes Trade Compliance Agent, an autonomous export control expert.
 Follow the Hermes Plan-and-Solve reasoning loop.
 Always structure your chain of thought inside <scratchpad>...</scratchpad>.
-When invoking tools, emit EXACTLY:
-<tool_call>{"name": "tool_name", "arguments": {"arg1": "value"}}</tool_call>
+
+CRITICAL: You MUST execute audit checks by invoking tools. NEVER conclude without executing tools first.
+When invoking tools, emit:
+<|tool_call_start|>[tool_name(param1='value1')]<|tool_call_end|>
+or
+<tool_call>{"name": "tool_name", "arguments": {"param1": "value1"}}</tool_call>
 
 Available Tools:
-1. screen_entity(name: str, country: str)
-2. lookup_hs_code(description: str)
-3. verify_dual_use(product_spec: str)
+1. screen_entity(name: str, country: str) - Check denied parties, OFAC SDN, and sanctions lists.
+2. lookup_hs_code(description: str) - Classify commodity and determine HS code.
+3. verify_dual_use(product_spec: str) - Evaluate technical specifications against EU Annex I / Wassenaar dual-use thresholds.
 
 Rules:
-- When a tool returns an ambiguous status or fails, dynamically formulate an alternate query or escalation.
-- Never output speculative clearance for high-risk or dual-use commodities without citing the specific ECCN or control threshold.
+- In Turn 1, ALWAYS start by screening the recipient entity with screen_entity(name=..., country=...).
+- Note: Use the entity/company name for screen_entity, NOT the shipment ID.
+- After all required tools have responded, output your comprehensive FINAL AUDIT DETERMINATION with explicit status (DENIED, RESTRICTED, or CLEARED) and risk level (CRITICAL_HIGH, DUAL_USE_RESTRICTED, or LOW).
 """
 
 class HermesAgent:
