@@ -55,7 +55,7 @@ class OpenAICompatibleClient(BaseLLMClient):
         base_url: str = "http://localhost:8000/v1",
         api_key: str = "local",
         model: str = "hermes-3-llama-3.1-8b",
-        timeout: float = 15.0,
+        timeout: float = 90.0,
     ) -> None:
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -80,7 +80,7 @@ class OpenAICompatibleClient(BaseLLMClient):
             "model": self.model,
             "messages": messages,
             "temperature": temperature,
-            "max_tokens": 1024,
+            "max_tokens": 2048,
         }
         with httpx.Client(timeout=self.timeout) as client:
             resp = client.post(f"{self.base_url}/chat/completions", headers=headers, json=payload)
@@ -262,9 +262,9 @@ Always structure your chain of thought inside <scratchpad>...</scratchpad>.
 
 CRITICAL: You MUST execute audit checks by invoking tools. NEVER conclude without executing tools first.
 When invoking tools, emit:
-<|tool_call_start|>[tool_name(param1='value1')]<|tool_call_end|>
+<|tool_call_start|>[screen_entity(name='...', country='...')]<|tool_call_end|>
 or
-<tool_call>{"name": "tool_name", "arguments": {"param1": "value1"}}</tool_call>
+<tool_call>{"name": "screen_entity", "arguments": {"name": "...", "country": "..."}}</tool_call>
 
 Available Tools:
 1. screen_entity(name: str, country: str) - Check denied parties, OFAC SDN, and sanctions lists.
@@ -272,9 +272,11 @@ Available Tools:
 3. verify_dual_use(product_spec: str) - Evaluate technical specifications against EU Annex I / Wassenaar dual-use thresholds.
 
 Rules:
-- In Turn 1, ALWAYS start by screening the recipient entity with screen_entity(name=..., country=...).
-- Note: Use the entity/company name for screen_entity, NOT the shipment ID.
-- After all required tools have responded, output your comprehensive FINAL AUDIT DETERMINATION with explicit status (DENIED, RESTRICTED, or CLEARED) and risk level (CRITICAL_HIGH, DUAL_USE_RESTRICTED, or LOW).
+- Step 1: Call screen_entity(name=..., country=...) using the company name (NOT the shipment ID).
+- Step 2: Call lookup_hs_code(description=...) to determine the HS code and ECCN classification.
+- Step 3: Call verify_dual_use(product_spec=...) to check technical threshold limits.
+- IMPORTANT: DO NOT re-invoke tools that have already been executed. Each tool only needs to be called ONCE.
+- Once all tools have responded, output your complete FINAL AUDIT DETERMINATION with explicit status (DENIED, RESTRICTED, or CLEARED) and risk level (CRITICAL_HIGH, DUAL_USE_RESTRICTED, or LOW).
 """
 
 class HermesAgent:
@@ -296,21 +298,114 @@ class HermesAgent:
         }
 
     def _extract_tool_calls(self, text: str) -> List[Dict[str, Any]]:
-        """Extract tool calls from <tool_call>...</tool_call> XML blocks."""
-        pattern = r"<tool_call>\s*({.*?})\s*</tool_call>"
-        matches = re.findall(pattern, text, re.DOTALL)
+        """
+        Extract tool calls from multiple model output formats:
+        1. Standard XML: <tool_call>{"name": ..., "arguments": ...}</tool_call>
+        2. Liquid / Hermes special tokens: <|tool_call_start|>[func(arg='val')]<|tool_call_end|>
+        3. Raw JSON: <tool_call>[{...}]</tool_call> or <|tool_call_start|>[{...}]<|tool_call_end|>
+        4. Fallback python call expressions: screen_entity(...), etc.
+        """
         calls: List[Dict[str, Any]] = []
-        for m in matches:
+
+        # 1. XML format <tool_call>...</tool_call>
+        xml_matches = re.findall(r"<tool_call>\s*(.*?)\s*</tool_call>", text, re.DOTALL)
+        for m in xml_matches:
+            m = m.strip()
+            # Try JSON parsing
             try:
-                calls.append(json.loads(m))
+                parsed = json.loads(m)
+                if isinstance(parsed, list):
+                    calls.extend(parsed)
+                elif isinstance(parsed, dict):
+                    calls.append(parsed)
+                continue
             except json.JSONDecodeError:
-                # Attempt regex cleanup
+                pass
+            # Try regex cleanup for single quotes
+            try:
                 cleaned = m.replace("'", '"')
+                parsed = json.loads(cleaned)
+                if isinstance(parsed, list):
+                    calls.extend(parsed)
+                elif isinstance(parsed, dict):
+                    calls.append(parsed)
+                continue
+            except Exception:
+                pass
+            # Try Python AST
+            self._parse_ast_calls(m, calls)
+
+        # 2. Liquid / Hermes special tokens: <|tool_call_start|>(.*?)<|tool_call_end|>
+        lfm_matches = re.findall(r"<\|tool_call_start\|>\s*(.*?)\s*(?:<\|tool_call_end\|>|$)", text, re.DOTALL)
+        for block in lfm_matches:
+            block = block.strip()
+            # Case A: JSON format
+            if block.startswith("{") or block.startswith("["):
                 try:
-                    calls.append(json.loads(cleaned))
+                    parsed = json.loads(block)
+                    if isinstance(parsed, list):
+                        calls.extend(parsed)
+                    elif isinstance(parsed, dict):
+                        calls.append(parsed)
+                    continue
                 except Exception:
                     pass
-        return calls
+            # Case B: Python-style expression list: [func(arg=val), ...]
+            self._parse_ast_calls(block, calls)
+
+        # 3. Direct pattern fallback if no calls extracted yet
+        if not calls:
+            direct_matches = re.findall(
+                r"(\b(?:screen_entity|lookup_hs_code|verify_dual_use))\((.*?)\)", text, re.DOTALL
+            )
+            for fname, args_str in direct_matches:
+                kv_matches = re.findall(r"(\w+)\s*=\s*['\"](.*?)['\"]", args_str)
+                if kv_matches:
+                    calls.append({"name": fname, "arguments": dict(kv_matches)})
+
+        # Validate extracted calls
+        valid_calls = []
+        for c in calls:
+            if isinstance(c, dict) and "name" in c:
+                name = c["name"]
+                args = c.get("arguments", {})
+                if not isinstance(args, dict):
+                    args = {}
+                valid_calls.append({"name": name, "arguments": args})
+
+        return valid_calls
+
+    def _parse_ast_calls(self, expr_str: str, calls_out: List[Dict[str, Any]]) -> None:
+        """Parse Python-style AST expressions like [screen_entity(name='...', country='...')]"""
+        try:
+            tree = ast.parse(expr_str.strip(), mode="eval")
+            nodes = []
+            if isinstance(tree.body, ast.List):
+                nodes = tree.body.elts
+            elif isinstance(tree.body, ast.Call):
+                nodes = [tree.body]
+            elif isinstance(tree.body, ast.Tuple):
+                nodes = tree.body.elts
+
+            for node in nodes:
+                if isinstance(node, ast.Call):
+                    func_name = node.func.id if isinstance(node.func, ast.Name) else str(node.func)
+                    kwargs = {}
+                    for kw in node.keywords:
+                        try:
+                            kwargs[kw.arg] = ast.literal_eval(kw.value)
+                        except Exception:
+                            kwargs[kw.arg] = ast.unparse(kw.value) if hasattr(ast, "unparse") else str(kw.value)
+                    calls_out.append({"name": func_name, "arguments": kwargs})
+        except Exception:
+            # Fallback regex if AST parsing fails
+            func_matches = re.finditer(r"(\b\w+)\((.*?)\)", expr_str)
+            for fm in func_matches:
+                fname = fm.group(1)
+                args_str = fm.group(2)
+                kv_matches = re.findall(r"(\w+)\s*=\s*['\"](.*?)['\"]", args_str)
+                if kv_matches and fname in self.tools:
+                    calls_out.append({"name": fname, "arguments": dict(kv_matches)})
 
     def _execute_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """Execute tool with error handling and fallback recovery."""
@@ -396,40 +491,75 @@ class HermesAgent:
                 # No tool calls; final synthesis reached
                 print("[Verdict] Final Audit Determination Reached:")
                 print(response)
+
+                # Infer risk level from final synthesis text if not already escalated
+                upper_resp = response.upper()
+                if any(w in upper_resp for w in ["DENIED", "CRITICAL_HIGH", "OFAC-SDN", "BLOCKED", "SANCTIONED", "RED FLAG"]):
+                    risk_level = "CRITICAL_HIGH"
+                elif any(w in upper_resp for w in ["DUAL_USE_RESTRICTED", "DUAL-USE", "PERMIT MANDATORY", "ANNEX I"]):
+                    if risk_level != "CRITICAL_HIGH":
+                        risk_level = "DUAL_USE_RESTRICTED"
+
                 final_verdict = {
                     "determination_summary": response,
                     "completed_turns": turn,
                 }
                 break
 
+            tool_response_messages: List[str] = []
+            already_executed_names = {c["name"] for c in recorded_tool_calls}
+
             for tc in tool_calls:
                 t_name = tc.get("name", "")
                 t_args = tc.get("arguments", {})
+
+                # Validate tool existence
+                if t_name not in self.tools:
+                    tool_response_messages.append(
+                        f"<tool_response>\n"
+                        f'{{"tool": "{t_name}", "error": "Tool \'{t_name}\' does not exist. Available tools: screen_entity, lookup_hs_code, verify_dual_use"}}\n'
+                        f"</tool_response>"
+                    )
+                    continue
+
+                # De-duplicate: avoid re-running same tool if already completed
+                if t_name in already_executed_names:
+                    prev_result = next((c["result"] for c in recorded_tool_calls if c["name"] == t_name), {})
+                    tool_response_messages.append(
+                        f"<tool_response>\n"
+                        f'{{"tool": "{t_name}", "status": "ALREADY_COMPLETED", "previous_output": {json.dumps(prev_result)}, "note": "Tool \'{t_name}\' was already executed in a previous turn. Proceed to remaining required checks or synthesize your final determination."}}\n'
+                        f"</tool_response>"
+                    )
+                    continue
+
                 print(f"[Tool Call] Invoking: {t_name}({t_args})")
 
                 t_result = self._execute_tool(t_name, t_args)
                 recorded_tool_calls.append({"name": t_name, "arguments": t_args, "result": t_result})
+                already_executed_names.add(t_name)
 
                 # Log step in memory
                 self.memory.record_audit_step(shipment_id, f"tool_{t_name}", {"input": t_args, "output": t_result})
 
                 # Check risk triggers
                 if t_name == "screen_entity":
-                    if t_result.get("risk_level") in ["CRITICAL_HIGH", "HIGH"]:
+                    if t_result.get("risk_level") in ["CRITICAL_HIGH", "HIGH"] or t_result.get("action_required") == "TRANSACTION_DENIED_IMMEDIATELY":
                         risk_level = "CRITICAL_HIGH"
                 elif t_name == "verify_dual_use":
                     if t_result.get("is_dual_use"):
                         if risk_level != "CRITICAL_HIGH":
                             risk_level = "DUAL_USE_RESTRICTED"
 
-                tool_response_msg = (
+                tool_response_messages.append(
                     f"<tool_response>\n"
                     f'{{"tool": "{t_name}", "output": {json.dumps(t_result)}}}\n'
                     f"</tool_response>"
                 )
-                messages.append({"role": "assistant", "content": response})
-                messages.append({"role": "user", "content": tool_response_msg})
-                self.memory.add_scratchpad_message("user", tool_response_msg)
+
+            messages.append({"role": "assistant", "content": response})
+            combined_tool_msg = "\n\n".join(tool_response_messages)
+            messages.append({"role": "user", "content": combined_tool_msg})
+            self.memory.add_scratchpad_message("user", combined_tool_msg)
 
         # Record completed episode in persistent memory
         ep_id = self.memory.record_episode(

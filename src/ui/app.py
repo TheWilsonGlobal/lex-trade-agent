@@ -30,6 +30,10 @@ for p in (PROJECT_ROOT, SRC_DIR):
 # Load environment variables from .env
 load_dotenv(os.path.join(PROJECT_ROOT, ".env"), override=True)
 
+import importlib
+import agent.hermes_orchestrator
+importlib.reload(agent.hermes_orchestrator)
+
 from agent.hermes_orchestrator import HermesAgent, create_llm_client
 from agent.memory.hybrid_memory import AgentEpisodicMemory
 from database.seed_sample_data import seed_database
@@ -318,7 +322,7 @@ with tab_audit:
             )
 
         st.markdown(f"**Execution Metrics**: {audit_result.get('turns')} turns completed | {audit_result.get('tool_calls_executed')} tool calls executed | Episode ID #{audit_result.get('episode_id')} stored in SQLite.")
-        st.markdown(f"```text\n{summary_text}\n```")
+        st.markdown(summary_text)
 
 
 # ============================================================================
