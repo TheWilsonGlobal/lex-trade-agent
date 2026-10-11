@@ -109,7 +109,7 @@ memory = get_memory()
 # Sidebar: System Status & Demo Presets
 # ============================================================================
 
-st.sidebar.image("https://img.shields.io/badge/Architecture-Hermes%20ReAct%20%2B%20FastMCP-blue?style=for-the-badge", use_container_width=True)
+st.sidebar.image("https://img.shields.io/badge/Architecture-Hermes%20ReAct%20%2B%20FastMCP-blue?style=for-the-badge", width="stretch")
 st.sidebar.title("System Controls")
 
 llm_url = os.getenv("LLM_API_URL") or os.getenv("OPENAI_BASE_URL") or "http://localhost:8000/v1"
@@ -152,7 +152,7 @@ PRESETS = {
 
 selected_preset = st.sidebar.selectbox("Choose a scenario:", list(PRESETS.keys()))
 
-if st.sidebar.button("Load Selected Preset", use_container_width=True):
+if st.sidebar.button("Load Selected Preset", width="stretch"):
     preset_data = PRESETS[selected_preset]
     st.session_state["shipment_id"] = preset_data["shipment_id"]
     st.session_state["recipient"] = preset_data["recipient"]
@@ -162,7 +162,7 @@ if st.sidebar.button("Load Selected Preset", use_container_width=True):
     st.sidebar.success(f"Loaded: {selected_preset}")
 
 st.sidebar.markdown("---")
-if st.sidebar.button("🔄 Re-Seed Historical Precedents", use_container_width=True):
+if st.sidebar.button("🔄 Re-Seed Historical Precedents", width="stretch"):
     with st.spinner("Seeding database..."):
         seed_database(DB_PATH)
         st.cache_resource.clear()
@@ -221,7 +221,7 @@ with tab_audit:
         height=70,
     )
 
-    run_audit = st.button("🚀 Run Autonomous Compliance Audit", type="primary", use_container_width=True)
+    run_audit = st.button("🚀 Run Autonomous Compliance Audit", type="primary", width="stretch")
 
     if run_audit:
         st.markdown("---")
@@ -355,7 +355,7 @@ with tab_memory:
             cursor.execute("SELECT id, shipment_id, risk_level, query_text, datetime(created_at, 'unixepoch') as created_at FROM episodes ORDER BY id DESC LIMIT 50")
             ep_rows = cursor.fetchall()
             if ep_rows:
-                st.dataframe([dict(r) for r in ep_rows], use_container_width=True)
+                st.dataframe([dict(r) for r in ep_rows], width="stretch")
             else:
                 st.info("No episodes in database. Click 'Re-Seed Historical Precedents' in the sidebar.")
     except Exception as e:
@@ -407,4 +407,4 @@ with tab_bench:
         st.success(f"🏆 **Composite Production Readiness Score: {bench_results['composite_score']} / 100.0**")
 
         st.markdown("### Evaluated Scenarios:")
-        st.dataframe(bench_results.get("scenarios_evaluated", []), use_container_width=True)
+        st.dataframe(bench_results.get("scenarios_evaluated", []), width="stretch")
