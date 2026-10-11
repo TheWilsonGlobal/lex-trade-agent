@@ -48,6 +48,7 @@ htmlcov/
 *.env
 
 # SQLite runtime databases & local data
+lex_trade_memory.db
 *.db
 *.db-journal
 *.sqlite3
