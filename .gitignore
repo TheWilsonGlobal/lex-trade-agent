@@ -1,5 +1,9 @@
 # Python bytecode & cache
 __pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
 *.py[cod]
 *$py.class
 *.so
@@ -49,7 +53,9 @@ htmlcov/
 
 # SQLite runtime databases & local data
 lex_trade_memory.db
+**/lex_trade_memory.db
 *.db
+**/*.db
 *.db-journal
 *.sqlite3
 
