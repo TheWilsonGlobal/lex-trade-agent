@@ -146,10 +146,13 @@ class MockLLMClient(BaseLLMClient):
                 )
 
         # 5. Final Step: Synthesis & Audit Determination
-        if "CRITICAL_HIGH" in history_text or "OFAC-SDN" in history_text or "CMIC" in history_text:
+        tool_responses_text = " ".join(
+            m.get("content", "") for m in messages if "<tool_response>" in m.get("content", "")
+        )
+        if any(k in tool_responses_text for k in ["CRITICAL_HIGH", "OFAC-SDN", "CMIC-EO13959", "HUMAN_ESCALATION_REQUIRED"]):
             risk_summary = "CRITICAL_HIGH - Identified on Denied Persons / Sanctions list. HUMAN_ESCALATION_REQUIRED."
             action_summary = "TRANSACTION BLOCKED & ESCALATED TO COMPLIANCE DIRECTOR."
-        elif 'is_dual_use": true' in history_text or "3A001" in history_text or "5A002" in history_text:
+        elif '"is_dual_use": true' in tool_responses_text or "3A001" in tool_responses_text or "5A002" in tool_responses_text:
             risk_summary = "DUAL_USE_RESTRICTED - Technical parameters exceed commercial de-minimis."
             action_summary = "EXPORT PERMIT REQUIRED PRIOR TO CUSTOMS CLEARANCE."
         else:

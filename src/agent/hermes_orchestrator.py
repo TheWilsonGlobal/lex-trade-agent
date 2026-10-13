@@ -178,11 +178,29 @@ class HermesAgent:
                 print(response)
 
                 upper_resp = response.upper()
-                if any(w in upper_resp for w in ["DENIED", "CRITICAL_HIGH", "OFAC-SDN", "BLOCKED", "SANCTIONED", "RED FLAG"]):
+
+                # Focus risk parsing on the final Conclusion / Verdict section to avoid matching sub-checks (like Entity Screening: CLEARED)
+                conclusion_markers = ["### CONCLUSION", "## CONCLUSION", "CONCLUSION:", "FINAL ACTION:", "OVERALL COMPLIANCE STATUS", "FINAL AUDIT DETERMINATION"]
+                conclusion_text = upper_resp
+                for marker in conclusion_markers:
+                    idx = upper_resp.rfind(marker)
+                    if idx != -1:
+                        conclusion_text = upper_resp[idx:]
+                        break
+
+                has_dual_use_tool = any(
+                    tc.get("name") == "verify_dual_use" and tc.get("result", {}).get("is_dual_use") is True
+                    for tc in recorded_tool_calls
+                )
+
+                if any(w in conclusion_text for w in ["STATUS: DENIED", "DETERMINATION: CRITICAL_HIGH", "OFAC-SDN", "BLOCKED TRANSACTION"]):
                     risk_level = "CRITICAL_HIGH"
-                elif any(w in upper_resp for w in ["DUAL_USE_RESTRICTED", "DUAL-USE", "PERMIT MANDATORY", "ANNEX I"]):
+                elif any(w in conclusion_text for w in ["STATUS: RESTRICTED", "DUAL_USE_RESTRICTED", "PERMIT MANDATORY", "MANDATORY EXPORT AUTHORIZATION"]) or has_dual_use_tool:
                     if risk_level != "CRITICAL_HIGH":
                         risk_level = "DUAL_USE_RESTRICTED"
+                elif any(w in conclusion_text for w in ["DETERMINATION: CLEARED", "STATUS: CLEARED", "NO LICENSE REQUIRED", "COMPLIANT"]):
+                    if risk_level != "CRITICAL_HIGH" and not has_dual_use_tool:
+                        risk_level = "LOW"
 
                 final_verdict = {
                     "determination_summary": response,
